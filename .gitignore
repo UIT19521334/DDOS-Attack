@@ -1,3 +1,6 @@
 class_split/
 dataset/
 *.csv
+node_modules
+package-lock.json
+venv
