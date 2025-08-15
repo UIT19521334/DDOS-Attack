@@ -183,9 +183,9 @@
 <body>
     <div class="header">
         <div class="nav-buttons">
+            <button class="nav-btn udp">Start UDP Attack</button>
+            <button class="nav-btn http">Start HTTP Attack</button>
             <button class="nav-btn stop">🛑 Stop Attack</button>
-            <button class="nav-btn udp">UDP Flood</button>
-            <button class="nav-btn http">🌐 HTTP Flood</button>
             <button class="nav-btn statistics">📊 Statistics</button>
             <button class="nav-btn monitor">🖥️ Monitor Browser Traffic</button>
         </div>
@@ -226,6 +226,10 @@
         <div class="attack-detection">
             <div class="attack-title">Attack Detection</div>
             <div class="no-attack" id="attackStatus">No Attack Detected</div>
+            <div id="ddosIpList" style="margin-top:12px; text-align:left; display:none;">
+                <b>Detected DDoS IPs:</b>
+                <ul id="ipListUl" style="margin:4px 0 0 16px;"></ul>
+            </div>
         </div>
     </div>
 
@@ -277,7 +281,7 @@
         });
 
         // API Base URL
-        const API_BASE = 'http://localhost:5000/api';
+        const API_BASE = 'http://localhost:5001/api';
         
         // Fetch stats from Flask backend
         async function updateStatsFromAPI() {
@@ -327,28 +331,20 @@
             try {
                 const response = await fetch(`${API_BASE}/traffic`);
                 const trafficData = await response.json();
-                
-                // Update chart with new data
-                const now = new Date();
-                const timeStr = now.toLocaleTimeString();
-                
-                const newValue = trafficData[trafficData.length - 1]?.value || Math.floor(Math.random() * 10) + 1;
-                
-                chart.data.labels.push(timeStr);
-                chart.data.datasets[0].data.push(newValue);
-                
-                // Keep only last 10 data points
-                if (chart.data.labels.length > 10) {
-                    chart.data.labels.shift();
-                    chart.data.datasets[0].data.shift();
-                }
-                
+                if (!Array.isArray(trafficData) || trafficData.length === 0) return;
+
+                // Use all timestamps and packets/sec from backend
+                const labels = trafficData.map(d => {
+                    const date = new Date(d.time);
+                    return date.toLocaleTimeString();
+                });
+                const packets = trafficData.map(d => d.packets);
+
+                chart.data.labels = labels;
+                chart.data.datasets[0].data = packets;
                 chart.update('none');
-                
             } catch (error) {
                 console.error('Error fetching traffic data:', error);
-                // Fallback to local update
-                updateStatsLocally();
             }
         }
         
@@ -377,11 +373,36 @@
             chart.update('none');
         }
 
+        // Hàm fetch và hiển thị danh sách IP bị detect DDoS
+        async function updateDdosIpList() {
+            try {
+                const res = await fetch(`${API_BASE}/ddos_ips`);
+                const data = await res.json();
+                const ipListDiv = document.getElementById('ddosIpList');
+                const ul = document.getElementById('ipListUl');
+                ul.innerHTML = '';
+                if (data.ddos_ips && data.ddos_ips.length > 0) {
+                    data.ddos_ips.forEach(ipObj => {
+                        const li = document.createElement('li');
+                        li.innerHTML = `<b>${ipObj.ip}</b> | Packets: ${ipObj.total_packets} | Bytes: ${ipObj.total_bytes} | Prob: <span style='color:#dc3545'>${(ipObj.attack_probability*100).toFixed(1)}%</span>`;
+                        ul.appendChild(li);
+                    });
+                    ipListDiv.style.display = '';
+                } else {
+                    ipListDiv.style.display = 'none';
+                }
+            } catch (e) {
+                document.getElementById('ddosIpList').style.display = 'none';
+            }
+        }
+
         // Update every 2 seconds
         setInterval(() => {
-            updateStatsFromAPI();
             updateTrafficChart();
-        }, 2000);
+            updateStatsFromAPI();
+        }, 500);
+
+        
 
         // Button click handlers with API integration
         document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -399,35 +420,42 @@
                             },
                             body: JSON.stringify({ type: 'stop' })
                         });
-                        
                         document.getElementById('attackStatus').textContent = '✅ Attack Stopped - Normal Traffic';
                         document.getElementById('attackStatus').style.color = '#28a745';
-                        
-                    } else if (action.includes('UDP Flood')) {
-                        // Simulate UDP flood attack
+                        // Optionally, disable Stop Attack button and enable Start Attack buttons
+                        document.querySelector('.nav-btn.stop').disabled = true;
+                        document.querySelector('.nav-btn.udp').disabled = false;
+                        document.querySelector('.nav-btn.http').disabled = false;
+                        clearInterval(ddosIpInterval);
+                        updateDdosIpList();
+                    } else if (action.includes('Start UDP Attack')) {
                         await fetch(`${API_BASE}/simulate_attack`, {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
+                            headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ type: 'udp_flood' })
                         });
-                        
                         document.getElementById('attackStatus').textContent = '🚨 UDP Flood Attack Detected';
                         document.getElementById('attackStatus').style.color = '#dc3545';
-                        
-                    } else if (action.includes('HTTP Flood')) {
-                        // Simulate HTTP flood attack
+                        document.querySelector('.nav-btn.stop').disabled = false;
+                        document.querySelector('.nav-btn.udp').disabled = true;
+                        document.querySelector('.nav-btn.http').disabled = false;
+                        clearInterval(ddosIpInterval);
+                        await updateDdosIpList();
+                        ddosIpInterval = setInterval(updateDdosIpList, 0);
+                    } else if (action.includes('Start HTTP Attack')) {
                         await fetch(`${API_BASE}/simulate_attack`, {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
+                            headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ type: 'http_flood' })
                         });
-                        
                         document.getElementById('attackStatus').textContent = '🚨 HTTP Flood Attack Detected';
                         document.getElementById('attackStatus').style.color = '#dc3545';
+                        document.querySelector('.nav-btn.stop').disabled = false;
+                        document.querySelector('.nav-btn.udp').disabled = false;
+                        document.querySelector('.nav-btn.http').disabled = true;
+                        clearInterval(ddosIpInterval);
+                        await updateDdosIpList();
+                        ddosIpInterval = setInterval(updateDdosIpList, 0);
                     }
                     
                     // Add visual feedback
