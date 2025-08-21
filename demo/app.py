@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+# filepath: d:\DAT\DDOS-Attack\demo\app.py
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 import torch
@@ -336,6 +338,49 @@ TRAFFIC_HISTORY_SIZE = 30
 traffic_history = []
 TRAFFIC_HISTORY_SIZE = 30
 
+def get_random_traffic_data():
+    global current_data_source
+    
+    if current_data_source == 'benign':
+        # Get random row from benign traffic
+        if benign_df is not None and len(benign_df) > 0:
+            sample = benign_df.sample(1).iloc[0]
+            return {
+                'packet_length': int(sample.get('Flow Bytes/s', random.randint(64, 1500))),
+                'protocol': int(sample.get('Protocol', 6)),
+                'source_port': int(sample.get('Source Port', random.randint(1024, 65535))),
+                'dest_port': int(sample.get('Destination Port', 80)),
+                'packet_rate': float(sample.get('Flow Packets/s', random.uniform(1, 20))),
+                'byte_rate': float(sample.get('Flow Bytes/s', random.uniform(100, 2000))),
+                'flow_duration': float(sample.get('Flow Duration', random.uniform(5.0, 60.0))),
+                'packet_count': int(sample.get('Total Fwd Packets', random.randint(1, 20))),
+                'unique_sources': 1,
+                'unique_destinations': 1,
+                'source_ip': f"10.0.{random.randint(1, 255)}.{random.randint(1, 254)}",
+                'attack_type': None
+            }
+    else:
+        # Get random row from DDoS traffic
+        if ddos_df is not None and len(ddos_df) > 0:
+            sample = ddos_df.sample(1).iloc[0]
+            return {
+                'packet_length': int(sample.get('packet_length', random.randint(800, 1500))),
+                'protocol': int(sample.get('protocol', 17)),
+                'source_port': int(sample.get('source_port', random.randint(1024, 65535))),
+                'dest_port': int(sample.get('dest_port', 80)),
+                'packet_rate': float(sample.get('packet_rate', random.uniform(800, 2000))),
+                'byte_rate': float(sample.get('byte_rate', random.uniform(50000, 150000))),
+                'flow_duration': float(sample.get('flow_duration', 0.1)),
+                'packet_count': int(sample.get('packet_count', random.randint(200, 500))),
+                'unique_sources': random.randint(2, 5),
+                'unique_destinations': 1,
+                'source_ip': f"192.168.1.{random.randint(100, 200)}",
+                'attack_type': 'ddos'
+            }
+
+    # Fallback to simulated data if no CSV
+    return simulate_network_traffic_with_ip(current_data_source == 'ddos')
+
 def simulate_network_traffic_with_ip(attack_type=None):
     ip_types = ['normal', 'suspicious', 'attack']
     ip_type = random.choices(ip_types, weights=[0.7, 0.2, 0.1])[0] if attack_type is None else 'attack'
@@ -409,11 +454,11 @@ def simulate_network_traffic_with_ip(attack_type=None):
         }
 
 def update_stats_continuously():
-    global current_stats
+    global current_stats, current_data_source
     while True:
         try:
             attack_type = current_stats.get('attack_type')
-            traffic_data = simulate_network_traffic_with_ip(attack_type)
+            traffic_data = get_random_traffic_data()
             
             source_ip = traffic_data.get('source_ip')
             attack_type = traffic_data.get('attack_type')
@@ -485,11 +530,16 @@ def load_model_and_preprocessors(load_path='../best_modal.pth'):
         return None, None, None
 
 try:
-    csv_data_df = pd.read_csv('combined_data.csv')
-    logger.info(f"CSV data loaded: {len(csv_data_df)} rows")
+    benign_df = pd.read_csv('./BenignTraffic.pcap_Flow.csv')
+    ddos_df = pd.read_csv('./combined_data.csv')
+    logger.info(f"Benign data loaded: {len(benign_df)} rows")
+    logger.info(f"DDoS data loaded: {len(ddos_df)} rows")
 except Exception as e:
     logger.warning(f"Could not load CSV data: {e}")
-    csv_data_df = None
+    benign_df = None
+    ddos_df = None
+
+current_data_source = 'benign'  # Default to benign traffic
 
 @app.route('/')
 def index():
@@ -499,24 +549,110 @@ def index():
 def get_stats():
     return jsonify(current_stats)
 
-@app.route('/api/predict', methods=['POST'])
-def predict_ddos():
+@app.route('/api/detect_stream', methods=['POST']) 
+def detect_stream():
     try:
-        data = request.json
-        source_ip = data.get('source_ip')
-        attack_type = data.get('attack_type')
-        prediction, confidence, details = detector.predict_with_ip_tracking(data, source_ip, attack_type)
+        # Get packet data from request
+        packet_data = request.json
         
+        if not packet_data:
+            return jsonify({'error': 'No packet data provided'}), 400
+
+        # Process features
+        features = detector.preprocess_features(packet_data)
+        if features is None:
+            return jsonify({'error': 'Invalid packet data'}), 400
+
+        sequence = detector.create_sequence(features)
+        input_tensor = torch.FloatTensor(sequence).unsqueeze(0).to(detector.device)
+        
+        with torch.no_grad():
+            outputs = detector.model(input_tensor)
+            probabilities = torch.softmax(outputs, dim=1)
+            confidence, predicted = torch.max(probabilities, 1)
+
+        prediction_label = detector.attack_types.get(predicted.item(), "Unknown")
+        confidence_score = confidence.item()
+
+        # Update IP tracking if source IP provided
+        source_ip = packet_data.get('source_ip')
+        if source_ip:
+            packet_size = packet_data.get('packet_length', 0)
+            detector.ip_tracker.update_ip_activity(
+                source_ip, 
+                packet_size,
+                prediction_label,
+                confidence_score,
+                packet_data.get('attack_type')
+            )
+
+        # Return detailed detection results
         return jsonify({
-            'prediction': prediction,
-            'confidence': confidence,
-            'threat_level': details['probabilities']['ddos'] * 100,
-            'source_ip': details['source_ip'],
-            'attack_type': attack_type,
-            'details': details,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'prediction': prediction_label,
+            'confidence': confidence_score,
+            'probabilities': {
+                'normal': probabilities[0][0].item(),
+                'ddos': probabilities[0][1].item()
+            },
+            'is_attack': prediction_label == "DDoS Attack",
+            'source_ip': source_ip,
+            'threat_level': probabilities[0][1].item() * 100
         })
+
     except Exception as e:
+        logging.error(f"Error in detection stream: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/detect_batch', methods=['POST'])
+def detect_batch():
+    try:
+        packets = request.json.get('packets', [])
+        if not packets:
+            return jsonify({'error': 'No packets provided'}), 400
+
+        results = []
+        for packet in packets:
+            features = detector.preprocess_features(packet)
+            if features is not None:
+                sequence = detector.create_sequence(features)
+                input_tensor = torch.FloatTensor(sequence).unsqueeze(0).to(detector.device)
+                
+                with torch.no_grad():
+                    outputs = detector.model(input_tensor)
+                    probabilities = torch.softmax(outputs, dim=1)
+                    confidence, predicted = torch.max(probabilities, 1)
+
+                prediction_label = detector.attack_types.get(predicted.item(), "Unknown")
+                confidence_score = confidence.item()
+
+                # Track IP if provided
+                source_ip = packet.get('source_ip')
+                if source_ip and prediction_label == "DDoS Attack":
+                    packet_size = packet.get('packet_length', 0)
+                    detector.ip_tracker.update_ip_activity(source_ip, packet_size, prediction_label, confidence_score)
+
+                results.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'source_ip': source_ip,
+                    'prediction': prediction_label,
+                    'confidence': confidence_score,
+                    'is_attack': prediction_label == "DDoS Attack",
+                    'probabilities': {
+                        'normal': probabilities[0][0].item(),
+                        'ddos': probabilities[0][1].item()
+                    },
+                    'threat_level': probabilities[0][1].item() * 100
+                })
+
+        return jsonify({
+            'total_packets': len(packets),
+            'processed': len(results),
+            'results': results
+        })
+
+    except Exception as e:
+        logging.error(f"Error in batch detection: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/traffic')
@@ -594,9 +730,34 @@ def get_sample_and_predict():
         logger.error(f"Error in sample prediction: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/sample_ddos_packets', methods=['GET'])
+def sample_ddos_packets():
+    if ddos_df is not None:
+        # Get 15 random rows from DDoS dataset
+        samples = ddos_df.sample(n=15)
+        packets = []
+        for _, row in samples.iterrows():
+            packet = {
+                'packet_length': int(row.get('Flow Bytes/s', 1500)),
+                'protocol': int(row.get('Protocol', 17)),
+                'source_port': int(row.get('Source Port', random.randint(1024, 65535))),
+                'dest_port': int(row.get('Destination Port', 80)),
+                'packet_rate': float(row.get('Flow Packets/s', 1000)),
+                'byte_rate': float(row.get('Flow Bytes/s', 50000)),
+                'flow_duration': float(row.get('Flow Duration', 0.1)),
+                'packet_count': int(row.get('Total Fwd Packets', 200)),
+                'unique_sources': 1,
+                'unique_destinations': 1,
+                'source_ip': f"192.168.1.{random.randint(100, 200)}",
+                'attack_type': 'ddos'
+            }
+            packets.append(packet)
+        return jsonify({'data': packets})
+    return jsonify({'error': 'DDoS dataset not available'}), 404
+
 @app.route('/api/simulate_attack', methods=['POST'])
 def simulate_attack():
-    global current_stats
+    global current_stats, current_data_source
     attack_type = request.json.get('type', 'ddos')
     
     if attack_type == 'stop':
@@ -607,11 +768,13 @@ def simulate_attack():
         detector.ip_tracker.clear_detected_ips()
         current_stats['ddos_ip_count'] = 0
         current_stats['suspicious_ip_count'] = 0
+        current_data_source = 'benign'  # Switch back to benign traffic
     else:
         current_stats['attack_detected'] = True
         current_stats['last_prediction'] = 'DDoS Attack'
         current_stats['threat_level'] = random.uniform(70, 95)
         current_stats['attack_type'] = attack_type
+        current_data_source = 'ddos'  # Switch to DDoS traffic
         
         attack_ips = [
             '192.168.1.100', '10.0.0.50', '172.16.1.200',

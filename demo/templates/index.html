@@ -94,6 +94,7 @@
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
+            margin-top: 30px;
         }
 
         .stat-card {
@@ -139,7 +140,7 @@
         }
 
         .chart-wrapper {
-            height: 300px;
+            height: 600px;
             position: relative;
         }
 
@@ -164,6 +165,74 @@
             font-weight: 500;
         }
 
+        .test-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+
+        .test-header {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+
+        .results-container {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .result-item {
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+        }
+
+        .result-item.attack {
+            border-left: 4px solid #dc3545;
+        }
+
+        .result-item.normal {
+            border-left: 4px solid #28a745;
+        }
+
+        .result-item.error {
+            border-left: 4px solid #ffc107;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .timestamp {
+            color: #6c757d;
+            font-size: 14px;
+        }
+
+        .prediction {
+            font-weight: 600;
+        }
+
+        .prediction.attack {
+            color: #dc3545;
+        }
+
+        .prediction.normal {
+            color: #28a745;
+        }
+
+        .result-details {
+            font-size: 14px;
+            color: #495057;
+        }
+
         .threat-level-0 { color: #28a745; }
         .threat-level-1 { color: #ffc107; }
         .threat-level-2 { color: #fd7e14; }
@@ -183,18 +252,23 @@
 <body>
     <div class="header">
         <div class="nav-buttons">
-            <button class="nav-btn udp">Start UDP Attack</button>
-            <button class="nav-btn http">Start HTTP Attack</button>
-            <button class="nav-btn stop">🛑 Stop Attack</button>
-            <button class="nav-btn statistics">📊 Statistics</button>
-            <button class="nav-btn monitor">🖥️ Monitor Browser Traffic</button>
+            <button class="nav-btn test" id="sendTestPackets">🚀 Send Test Packets</button>
+            <button class="nav-btn attack" id="ddosAttack" style="background: #dc3545; color: white;">💥 DDoS Attack</button>
+            <button class="nav-btn clear">🗑️ Clear Results</button>
         </div>
     </div>
 
     <div class="container">
         <div class="dashboard-header">
-            <h1>Network Security Monitor</h1>
-            <p>Real-time DDoS attack detection and analysis</p>
+            <h1>DDoS Detection System</h1>
+            <p>Test packet detection with trained model</p>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">Test Results</div>
+            <div class="results-container" id="testResults">
+                <!-- Detection results will be displayed here -->
+            </div>
         </div>
 
         <div class="stats-grid">
@@ -261,9 +335,21 @@
                 scales: {
                     y: {
                         beginAtZero: true,
-                        max: 12,
                         grid: {
                             color: '#e9ecef'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                if (value >= 1000) {
+                                    return (value/1000) + 'k';
+                                }
+                                return value;
+                            }
+                        },
+                        adapters: {
+                            date: {
+                                locale: 'en'
+                            }
                         }
                     },
                     x: {
@@ -404,76 +490,123 @@
 
         
 
-        // Button click handlers with API integration
-        document.querySelectorAll('.nav-btn').forEach(btn => {
-            btn.addEventListener('click', async function() {
-                const action = this.textContent.trim();
-                console.log('Action clicked:', action);
-                
-                try {
-                    if (action.includes('Stop Attack')) {
-                        // Call API to stop attack
-                        await fetch(`${API_BASE}/simulate_attack`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({ type: 'stop' })
-                        });
-                        document.getElementById('attackStatus').textContent = '✅ Attack Stopped - Normal Traffic';
-                        document.getElementById('attackStatus').style.color = '#28a745';
-                        // Optionally, disable Stop Attack button and enable Start Attack buttons
-                        document.querySelector('.nav-btn.stop').disabled = true;
-                        document.querySelector('.nav-btn.udp').disabled = false;
-                        document.querySelector('.nav-btn.http').disabled = false;
-                        clearInterval(ddosIpInterval);
-                        updateDdosIpList();
-                    } else if (action.includes('Start UDP Attack')) {
-                        await fetch(`${API_BASE}/simulate_attack`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ type: 'udp_flood' })
-                        });
-                        document.getElementById('attackStatus').textContent = '🚨 UDP Flood Attack Detected';
-                        document.getElementById('attackStatus').style.color = '#dc3545';
-                        document.querySelector('.nav-btn.stop').disabled = false;
-                        document.querySelector('.nav-btn.udp').disabled = true;
-                        document.querySelector('.nav-btn.http').disabled = false;
-                        clearInterval(ddosIpInterval);
-                        await updateDdosIpList();
-                        ddosIpInterval = setInterval(updateDdosIpList, 0);
-                    } else if (action.includes('Start HTTP Attack')) {
-                        await fetch(`${API_BASE}/simulate_attack`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ type: 'http_flood' })
-                        });
-                        document.getElementById('attackStatus').textContent = '🚨 HTTP Flood Attack Detected';
-                        document.getElementById('attackStatus').style.color = '#dc3545';
-                        document.querySelector('.nav-btn.stop').disabled = false;
-                        document.querySelector('.nav-btn.udp').disabled = false;
-                        document.querySelector('.nav-btn.http').disabled = true;
-                        clearInterval(ddosIpInterval);
-                        await updateDdosIpList();
-                        ddosIpInterval = setInterval(updateDdosIpList, 0);
+        // Handle sending test packets
+        document.getElementById('sendTestPackets').addEventListener('click', async function() {
+            try {
+                const testPackets = [
+                    {
+                        packet_length: 1200,
+                        protocol: 17, // UDP
+                        source_port: 53024,
+                        dest_port: 80,
+                        packet_rate: 500,
+                        byte_rate: 50000,
+                        flow_duration: 0.1,
+                        packet_count: 200,
+                        unique_sources: 2,
+                        unique_destinations: 1,
+                        source_ip: "192.168.1.100"
+                    },
+                    {
+                        packet_length: 150,
+                        protocol: 6, // TCP
+                        source_port: 12345,
+                        dest_port: 443,
+                        packet_rate: 50,
+                        byte_rate: 5000,
+                        flow_duration: 1.0,
+                        packet_count: 20,
+                        unique_sources: 1,
+                        unique_destinations: 1,
+                        source_ip: "192.168.1.101"
                     }
-                    
-                    // Add visual feedback
-                    this.style.transform = 'scale(0.95)';
-                    setTimeout(() => {
-                        this.style.transform = 'scale(1)';
-                    }, 150);
-                    
-                } catch (error) {
-                    console.error('Error calling API:', error);
-                    // Fallback to local behavior
-                    if (action.includes('Stop Attack')) {
-                        document.getElementById('attackStatus').textContent = '✅ Attack Stopped - Normal Traffic';
-                        document.getElementById('attackStatus').style.color = '#28a745';
-                    }
-                }
-            });
+                ];
+
+                const response = await fetch(`${API_BASE}/detect_batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ packets: testPackets })
+                });
+
+                const results = await response.json();
+                displayResults(results);
+
+            } catch (error) {
+                console.error('Error sending test packets:', error);
+                displayError('Failed to send test packets');
+            }
         });
+
+        document.querySelector('.nav-btn.clear').addEventListener('click', function() {
+            document.getElementById('testResults').innerHTML = '';
+        });
+
+        // Handle DDoS Attack button
+        document.getElementById('ddosAttack').addEventListener('click', async function() {
+            try {
+                const ddosResponse = await fetch(`${API_BASE}/simulate_attack`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'ddos' })
+                });
+
+                // Get sample DDoS packets from server
+                const packetsResponse = await fetch(`${API_BASE}/sample_ddos_packets`);
+                const packets = await packetsResponse.json();
+
+                // Send packets for detection
+                const response = await fetch(`${API_BASE}/detect_batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ packets: packets.data })
+                });
+
+                const results = await response.json();
+                displayResults(results);
+
+            } catch (error) {
+                console.error('Error sending DDoS packets:', error);
+                displayError('Failed to send DDoS packets');
+            }
+        });
+
+        // Helper function for random numbers
+        function random(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        };
+
+        function displayResults(results) {
+            const resultsDiv = document.getElementById('testResults');
+            const ddosResults = results.results.filter(result => result.is_attack);
+            const resultHtml = ddosResults.map(result => `
+                <div class="result-item attack">
+                    <div class="result-header">
+                        <span class="timestamp">${new Date(result.timestamp).toLocaleTimeString()}</span>
+                        <span class="prediction attack">🚨 DDoS Attack</span>
+                    </div>
+                    <div class="result-details">
+                        <div>Source IP: ${result.source_ip}</div>
+                        <div>Confidence: ${(result.confidence * 100).toFixed(1)}%</div>
+                        <div>Threat Level: ${result.threat_level.toFixed(1)}%</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            resultsDiv.innerHTML = resultHtml + resultsDiv.innerHTML;
+        }
+
+        function displayError(message) {
+            const resultsDiv = document.getElementById('testResults');
+            resultsDiv.innerHTML = `
+                <div class="result-item error">
+                    <div class="result-header">
+                        <span class="timestamp">${new Date().toLocaleTimeString()}</span>
+                        <span class="error">❌ Error</span>
+                    </div>
+                    <div class="result-details">${message}</div>
+                </div>
+            ` + resultsDiv.innerHTML;
+        }
         
         // Test model prediction với custom data
         async function testPrediction() {
