@@ -317,13 +317,14 @@ model = None
 scaler = None  
 label_encoder = None
 
+# Initialize with attack state
 current_stats = {
-    'threat_level': 0.3,
-    'packets_per_sec': 10,
-    'bytes_per_sec': 6226,
-    'unique_ips': 9,
-    'attack_detected': False,
-    'last_prediction': 'Normal Traffic',
+    'threat_level': 75.0,
+    'packets_per_sec': 800,
+    'bytes_per_sec': 50000,
+    'unique_ips': 5,
+    'attack_detected': True,
+    'last_prediction': 'DDoS Attack',
     'confidence': 0.0,
     'ddos_ip_count': 0,
     'suspicious_ip_count': 0,
@@ -530,8 +531,8 @@ def load_model_and_preprocessors(load_path='../best_modal.pth'):
         return None, None, None
 
 try:
-    benign_df = pd.read_csv('./BenignTraffic.pcap_Flow.csv')
-    ddos_df = pd.read_csv('./combined_data.csv')
+    benign_df = pd.read_csv('./normal_data.csv')
+    ddos_df = pd.read_csv('./ddos_data.csv')
     logger.info(f"Benign data loaded: {len(benign_df)} rows")
     logger.info(f"DDoS data loaded: {len(ddos_df)} rows")
 except Exception as e:
@@ -539,7 +540,7 @@ except Exception as e:
     benign_df = None
     ddos_df = None
 
-current_data_source = 'benign'  # Default to benign traffic
+current_data_source = 'ddos'  # Default to DDoS traffic
 
 @app.route('/')
 def index():
@@ -734,11 +735,11 @@ def get_sample_and_predict():
 def sample_ddos_packets():
     if ddos_df is not None:
         # Get 15 random rows from DDoS dataset
-        samples = ddos_df.sample(n=15)
+        samples = ddos_df.sample(n=150)
         packets = []
         for _, row in samples.iterrows():
             packet = {
-                'packet_length': int(row.get('Flow Bytes/s', 1500)),
+                'packet_length': float(row.get('Flow Bytes/s', 1500)),
                 'protocol': int(row.get('Protocol', 17)),
                 'source_port': int(row.get('Source Port', random.randint(1024, 65535))),
                 'dest_port': int(row.get('Destination Port', 80)),
@@ -748,7 +749,7 @@ def sample_ddos_packets():
                 'packet_count': int(row.get('Total Fwd Packets', 200)),
                 'unique_sources': 1,
                 'unique_destinations': 1,
-                'source_ip': f"192.168.1.{random.randint(100, 200)}",
+                'source_ip': row.get('Src IP', f"192.168.1.{random.randint(100, 200)}"),
                 'attack_type': 'ddos'
             }
             packets.append(packet)

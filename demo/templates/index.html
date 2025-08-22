@@ -397,11 +397,12 @@
                 
                 // Update attack status
                 const attackStatus = document.getElementById('attackStatus');
-                if (stats.attack_detected) {
+                const testResults = document.getElementById('testResults');
+                if (testResults.children.length > 0) {
                     attackStatus.textContent = `🚨 ${stats.last_prediction} Detected (${(stats.confidence * 100).toFixed(1)}%)`;
                     attackStatus.style.color = '#dc3545';
                 } else {
-                    attackStatus.textContent = `✅ ${stats.last_prediction}`;
+                    attackStatus.textContent = `✅ No Attack Detected`;
                     attackStatus.style.color = '#28a745';
                 }
                 
@@ -556,6 +557,12 @@
 
                 // Send packets for detection
                 const response = await fetch(`${API_BASE}/detect_batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ packets: packets.data })
+                });
+
+                const response3 = await fetch(`${API_BASE}/detect_stream`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ packets: packets.data })
